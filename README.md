@@ -52,9 +52,24 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173)
 
-## Usage
+## Walkthrough
 
-Paste a job posting (or hit "Load example" to see it work on a deliberately buzzword-heavy fake posting), optionally add your resume and check the cover letter / interview prep boxes, and hit "Decode Job Posting." Visit `/history` to revisit or compare past decodes.
+**1. Start with a job posting.** Paste the text directly, hit "Load example" to try it on a deliberately buzzword-heavy fake posting ("rockstar, ninja-level," no salary range, three jobs bundled into one), or paste a link and hit "Fetch →" to pull the text automatically from the page.
+
+**2. Add your resume (optional).** Paste it as text or hit "Upload PDF" — parsing happens entirely in your browser via pdfjs-dist, so the file itself never touches the server. Once a resume is present, two checkboxes appear: "Also draft a cover letter" and "Also generate interview prep." Both are off by default, so a plain decode only costs 1-2 model calls.
+
+**3. Hit "Decode Job Posting →" and watch the pipeline run live.** A step indicator appears — Job analysis → Fit score → Cover letter → Interview prep — each bubble moving from a hollow pending circle, to a pulsing "streaming" state, to a green checkmark. While a step is generating, a live panel underneath shows its raw output arriving token by token: JSON for job/fit/interview-prep, plain prose for the cover letter (the most satisfying one to watch — an actual letter typing itself out in real time).
+
+**4. Results appear as each step finishes** — you don't wait for the whole pipeline:
+- **Job analysis** lands first: a plain-English role summary, badges for seniority/buzzword density/salary transparency, must-haves vs. nice-to-haves side by side, and a red-flags list (or a "reads clean" note if there genuinely aren't any).
+- **Fit score** appears next as a color-coded 0-100 gauge (green/amber/red) with an honest summary — it won't inflate your odds. Below it: what you've already got covered, what's missing, and a **top-5 priority gaps** list, each one backed by a real quoted snippet from the posting so you can see exactly why it flagged that gap.
+- **Suggested resume bullets** follow, in XYZ format, each one built only from facts already on your resume and mapped to the specific gap it addresses.
+- **Cover letter** (if requested) renders in its own card with a one-click copy button.
+- **Interview prep** (if requested) renders as a list of likely questions paired with honest talking points — grounded in the same gaps and red flags already surfaced, not invented on the spot.
+
+**5. Every decode auto-saves.** Click "History →" in the header to see every past decode as a card (role title, date, fit-score badge). Click into one to replay the full analysis, select 2-4 and hit "Compare selected" to see them side by side on fit score, seniority, buzzword density, salary transparency, and keyword counts — useful for deciding which of several postings is actually worth your time. Resume text itself is never stored in history, only the analysis output.
+
+**6. If something fails partway through, you keep what already succeeded.** Each step runs and streams independently — if, say, interview prep hits a malformed response, the job analysis, fit score, and cover letter you already saw stay exactly as they are; only that one step shows an error (after retrying once automatically).
 
 ## Tests
 
