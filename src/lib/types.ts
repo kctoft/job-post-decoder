@@ -18,11 +18,18 @@ export interface SuggestedBullet {
 	targets: string;
 }
 
+export interface PriorityGap {
+	keyword: string;
+	evidence: string;
+	whyItMatters: string;
+}
+
 export interface FitAnalysis {
 	fitScore: number;
 	fitSummary: string;
 	matchedKeywords: string[];
 	missingKeywords: string[];
+	priorityGaps?: PriorityGap[];
 	suggestedBullets: SuggestedBullet[];
 }
 

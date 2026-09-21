@@ -19,7 +19,8 @@
 		"vitest": "^3.0.0"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.39.0"
+		"@anthropic-ai/sdk": "^0.39.0",
+		"pdfjs-dist": "^6.3.289"
 	},
 	"type": "module"
 }

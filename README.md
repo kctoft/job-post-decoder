@@ -4,9 +4,9 @@ Paste a job posting. Get the real requirements, the red flags, and — if you ad
 
 ## What it does
 
-1. Paste a job posting
+1. Paste a job posting, or a link to one
 2. A first agent extracts what the role actually is: must-haves vs. nice-to-haves, true seniority level, buzzword density, salary transparency, and concrete red flags with reasoning
-3. Optionally paste your resume — a second agent, seeded with the first agent's extracted requirements, scores your fit (0–100), lists matched and missing keywords, and drafts resume bullets that surface real experience you already have to cover the gaps
+3. Optionally add your resume (paste text or upload a PDF) — a second agent, seeded with the first agent's extracted requirements, scores your fit (0–100), lists matched and missing keywords, ranks the top 5 gaps with evidence quoted straight from the posting, and drafts resume bullets that surface real experience you already have to cover them
 4. The fit agent is instructed never to invent experience, metrics, or skills — only to resurface what's already on the resume
 
 ## Why two agents
@@ -16,18 +16,23 @@ The job-analysis step and the fit-scoring step are separate model calls, run in 
 ## Features
 
 - **Role decoder** — plain-English summary of what you'd actually spend your day doing
+- **Paste a link** — server-side fetch turns a job posting URL into text automatically (works best on Greenhouse/Lever/Ashby-style pages; JS-heavy sites like LinkedIn often block it, so pasting text is always the fallback)
+- **PDF resume upload** — parsed entirely in your browser with pdfjs-dist; the file itself is never sent to the server, only the extracted text
 - **Red flag detection** — vague/missing salary, "wear many hats," rockstar/ninja language, scope creep across disciplines, unrealistic seniority-vs-requirements combos
 - **Fit score** — honest 0–100 match against a resume, with reasoning
 - **Keyword gap analysis** — what's already covered vs. what's missing
+- **Top 5 priority gaps** — the missing requirements ranked by importance, each backed by a real quote from the posting (same evidence-based approach as a dedicated recruiter-scoring review)
 - **Tailored bullets** — XYZ-format suggestions built only from real resume content, each mapped to the requirement it targets
-- **Rate limited** — basic per-IP sliding window on the API route
+- **Rate limited** — basic per-IP sliding window on both API routes
+- **SSRF-guarded URL fetch** — blocks localhost/private/link-local addresses (including the cloud metadata IP), enforces an http(s)-only + redirect-revalidating fetch with a size cap and timeout
 
 ## Tech stack
 
 - **SvelteKit** — full-stack framework
 - **Anthropic Claude API** — two-step agent pipeline
+- **pdfjs-dist** — client-side PDF text extraction
 - **TypeScript** — end-to-end type safety
-- **Vitest** — unit tests for the JSON-extraction and rate-limiting logic
+- **Vitest** — unit tests for JSON extraction, rate limiting, the SSRF guard, and HTML-to-text conversion
 
 ## Quick start
 

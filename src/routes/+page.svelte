@@ -9,10 +9,74 @@
 	let result = $state<DecodeResult | null>(null);
 	let error = $state('');
 
+	let jobUrl = $state('');
+	let fetchingUrl = $state(false);
+	let urlError = $state('');
+
+	let pdfLoading = $state(false);
+	let pdfError = $state('');
+	let pdfFileName = $state('');
+
 	function fitColor(score: number): string {
 		if (score >= 70) return '#22c55e';
 		if (score >= 40) return '#f59e0b';
 		return '#ef4444';
+	}
+
+	async function fetchJobFromUrl() {
+		if (!jobUrl.trim()) return;
+		fetchingUrl = true;
+		urlError = '';
+		try {
+			const res = await fetch('/api/fetch-url', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ url: jobUrl.trim() })
+			});
+			const body = await res.json().catch(() => ({}));
+			if (!res.ok) throw new Error(body.error || 'Could not fetch that URL');
+			jobPosting = body.text;
+		} catch (e: any) {
+			urlError = e.message || 'Could not fetch that URL';
+		} finally {
+			fetchingUrl = false;
+		}
+	}
+
+	async function handlePdfUpload(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		pdfLoading = true;
+		pdfError = '';
+		pdfFileName = '';
+
+		try {
+			const pdfjsLib = await import('pdfjs-dist');
+			pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+				'pdfjs-dist/build/pdf.worker.min.mjs',
+				import.meta.url
+			).href;
+
+			const buffer = await file.arrayBuffer();
+			const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+			let text = '';
+			for (let i = 1; i <= pdf.numPages; i++) {
+				const page = await pdf.getPage(i);
+				const content = await page.getTextContent();
+				text += content.items.map((item: any) => ('str' in item ? item.str : '')).join(' ') + '\n\n';
+			}
+
+			if (!text.trim()) throw new Error('Could not extract text — is this a scanned/image PDF?');
+			resume = text.trim();
+			pdfFileName = file.name;
+		} catch (err: any) {
+			pdfError = err.message || 'Could not read that PDF';
+		} finally {
+			pdfLoading = false;
+			input.value = '';
+		}
 	}
 
 	async function runDecode() {
@@ -76,26 +140,61 @@
 			onfocus={(e) => e.currentTarget.style.borderColor = 'var(--border-focus)'}
 			onblur={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
 		></textarea>
+
+		<div style="display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border);">
+			<span style="font-size: 12px; color: var(--text-dim); flex-shrink: 0;">or paste a link</span>
+			<input
+				bind:value={jobUrl}
+				placeholder="https://jobs.example.com/posting/123"
+				style="flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; color: var(--text); font-size: 13px; font-family: inherit; outline: none;"
+				onfocus={(e) => e.currentTarget.style.borderColor = 'var(--border-focus)'}
+				onblur={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
+				onkeydown={(e) => e.key === 'Enter' && fetchJobFromUrl()}
+			/>
+			<button onclick={fetchJobFromUrl}
+				disabled={fetchingUrl || !jobUrl.trim()}
+				style="flex-shrink: 0; background: var(--accent-bg); color: var(--accent-light); border: none; border-radius: var(--radius-sm); padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap;">
+				{fetchingUrl ? 'Fetching...' : 'Fetch →'}
+			</button>
+		</div>
+		{#if urlError}
+			<div style="font-size: 12px; color: #f87171; margin-top: 8px;">{urlError}</div>
+		{/if}
+		<div style="font-size: 11px; color: var(--text-dim); margin-top: 6px;">
+			Works best on Greenhouse, Lever, and Ashby-style postings. Some sites (LinkedIn, Indeed) block automated fetching — paste the text directly if it fails.
+		</div>
 	</section>
 
 	<!-- Resume input -->
 	<section style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 24px;">
 		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
 			<label for="resume" style="font-weight: 500; font-size: 13px; color: var(--text-muted);">Your resume (optional — adds a fit score + tailored bullets)</label>
-			<button onclick={loadExampleResume}
-				style="background: var(--accent-bg); color: var(--accent-light); border: none; border-radius: 20px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit;">
-				Load example
-			</button>
+			<div style="display: flex; gap: 8px;">
+				<label style="background: var(--accent-bg); color: var(--accent-light); border: none; border-radius: 20px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit;">
+					{pdfLoading ? 'Reading PDF...' : 'Upload PDF'}
+					<input type="file" accept="application/pdf" onchange={handlePdfUpload} disabled={pdfLoading} style="display: none;" />
+				</label>
+				<button onclick={loadExampleResume}
+					style="background: var(--accent-bg); color: var(--accent-light); border: none; border-radius: 20px; padding: 6px 14px; font-size: 12px; cursor: pointer; font-family: inherit;">
+					Load example
+				</button>
+			</div>
 		</div>
 		<textarea
 			id="resume"
 			bind:value={resume}
-			placeholder="Paste your resume text here (optional)..."
+			placeholder="Paste your resume text here, or upload a PDF above (optional)..."
 			rows="8"
 			style="width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; color: var(--text); font-size: 13px; resize: vertical; font-family: inherit; outline: none; line-height: 1.5;"
 			onfocus={(e) => e.currentTarget.style.borderColor = 'var(--border-focus)'}
 			onblur={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
 		></textarea>
+		{#if pdfFileName}
+			<div style="font-size: 12px; color: #4ade80; margin-top: 8px;">Loaded text from {pdfFileName} — parsed in your browser, never uploaded.</div>
+		{/if}
+		{#if pdfError}
+			<div style="font-size: 12px; color: #f87171; margin-top: 8px;">{pdfError}</div>
+		{/if}
 	</section>
 
 	<button onclick={runDecode}
@@ -193,6 +292,24 @@
 					</div>
 				</section>
 			</div>
+
+			<!-- Priority gaps (evidence-based, top 5) -->
+			{#if fit.priorityGaps && fit.priorityGaps.length > 0}
+				<section style="margin-bottom: 24px;">
+					<h2 style="font-size: 16px; font-weight: 600; margin-bottom: 4px;">Top {fit.priorityGaps.length} gaps to fix first</h2>
+					<p style="font-size: 12px; color: var(--text-dim); margin-bottom: 12px;">Ranked by importance, each grounded in a real quote from the posting.</p>
+					{#each fit.priorityGaps as gap, i}
+						<div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 10px;">
+							<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+								<span style="background: rgba(245,158,11,0.15); color: var(--warning); font-size: 11px; font-weight: 700; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">{i + 1}</span>
+								<span style="font-size: 14px; font-weight: 600;">{gap.keyword}</span>
+							</div>
+							<div style="background: var(--bg-input); border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); font-style: italic;">"{gap.evidence}"</div>
+							<div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">{gap.whyItMatters}</div>
+						</div>
+					{/each}
+				</section>
+			{/if}
 
 			<!-- Suggested bullets -->
 			{#if fit.suggestedBullets.length > 0}

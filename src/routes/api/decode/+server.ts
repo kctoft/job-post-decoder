@@ -66,10 +66,11 @@ Return this exact JSON structure:
   "fitSummary": "<2-3 sentence honest summary of fit — don't inflate it>",
   "matchedKeywords": ["<skill/requirement the resume already demonstrates>", "..."],
   "missingKeywords": ["<skill/requirement the job wants that the resume doesn't clearly show>", "..."],
+  "priorityGaps": [{"keyword": "<the specific missing requirement>", "evidence": "<a short exact quote from the JOB POSTING showing this is required or emphasized>", "whyItMatters": "<1 sentence on why this gap matters for this specific role>"}],
   "suggestedBullets": [{"bullet": "<a new or reworded resume bullet using ONLY facts already present in the resume, written in XYZ format (Accomplished X as measured by Y by doing Z), that surfaces a missing keyword the candidate's real experience actually supports>", "targets": "<which missing keyword/requirement this bullet addresses>"}]
 }
 
-Rules: never invent experience, metrics, or skills the resume doesn't support — only rephrase or resurface what's already there. If a missing keyword truly isn't supported by anything in the resume, list it in missingKeywords but do not force a bullet for it. Aim for 3-5 suggested bullets.`
+Rules: never invent experience, metrics, or skills the resume doesn't support — only rephrase or resurface what's already there. If a missing keyword truly isn't supported by anything in the resume, list it in missingKeywords but do not force a bullet for it. priorityGaps is the top 5 (at most) missing keywords ranked by how much they matter for this role, each backed by a real quoted snippet from the job posting — this is the "if you fix nothing else, fix these" list. Aim for 3-5 suggested bullets.`
 		}]
 	});
 
