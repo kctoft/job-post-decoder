@@ -4,6 +4,7 @@ export interface RedFlag {
 }
 
 export interface JobAnalysis {
+	roleTitle: string;
 	roleSummary: string;
 	seniorityLevel: string;
 	mustHaves: string[];
@@ -33,10 +34,32 @@ export interface FitAnalysis {
 	suggestedBullets: SuggestedBullet[];
 }
 
+export interface InterviewPrepItem {
+	question: string;
+	talkingPoint: string;
+	gapAddressed: string;
+}
+
 export interface DecodeResult {
 	job: JobAnalysis;
 	fit: FitAnalysis | null;
+	coverLetter: string | null;
+	interviewPrep: InterviewPrepItem[] | null;
 }
+
+export type PipelineStep = 'job' | 'fit' | 'coverLetter' | 'interviewPrep';
+export type StepStatus = 'pending' | 'streaming' | 'complete' | 'skipped' | 'error';
+
+export type DecodeEvent =
+	| { type: 'step-start'; step: PipelineStep }
+	| { type: 'delta'; step: PipelineStep; text: string }
+	| { type: 'step-complete'; step: 'job'; data: JobAnalysis }
+	| { type: 'step-complete'; step: 'fit'; data: FitAnalysis }
+	| { type: 'step-complete'; step: 'coverLetter'; data: { letter: string } }
+	| { type: 'step-complete'; step: 'interviewPrep'; data: { items: InterviewPrepItem[] } }
+	| { type: 'step-skipped'; step: PipelineStep; reason: string }
+	| { type: 'error'; step?: PipelineStep; message: string }
+	| { type: 'done' };
 
 export const DENSITY_CONFIG = {
 	low: { label: 'Low buzzword density', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' },
