@@ -32,7 +32,7 @@ Each step is a separate model call, run in sequence, streamed to the browser ove
 - **Interview prep** — likely questions and honest talking points grounded in the specific gaps and red flags already found
 - **History + compare** — every decode auto-saves locally (resume text itself is never stored, only the analysis results); revisit any past decode or compare 2-4 side by side on fit score, buzzwords, salary transparency, and keyword counts
 - **Rate limited** — basic per-IP sliding window on both API routes
-- **SSRF-guarded URL fetch** — blocks localhost/private/link-local addresses (including the cloud metadata IP), enforces an http(s)-only + redirect-revalidating fetch with a size cap and timeout
+- **SSRF-guarded URL fetch** — blocks localhost/private/link-local addresses (including the cloud metadata IP), pins the actual connection to the DNS address it validated (not just the hostname — closes a DNS-rebinding TOCTOU gap), enforces an http(s)-only + redirect-revalidating fetch with a size cap and timeout
 
 ## Tech stack
 
@@ -40,7 +40,8 @@ Each step is a separate model call, run in sequence, streamed to the browser ove
 - **Anthropic Claude API** — four-step streaming agent pipeline
 - **pdfjs-dist** — client-side PDF text extraction
 - **TypeScript** — end-to-end type safety
-- **Vitest** — unit tests for JSON extraction, rate limiting, the SSRF guard, HTML-to-text conversion, prompt builders, and the history store
+- **zod** — runtime schema validation on every LLM JSON response before it's trusted
+- **Vitest** — unit tests for JSON extraction, rate limiting, the SSRF guard, HTML-to-text conversion, prompt builders, the history store, and the response schemas
 
 ## Architecture
 
@@ -60,6 +61,7 @@ src/
 │   │   └── history/               # history list/card, compare grid
 │   ├── server/
 │   │   ├── prompts.ts             # pure prompt-builder functions, one per pipeline step
+│   │   ├── schemas.ts             # zod schemas validating each step's parsed JSON
 │   │   └── streamAgent.ts         # wraps the Anthropic streaming call
 │   ├── client/
 │   │   ├── decodeStream.ts        # parses the SSE response into typed events
@@ -85,7 +87,9 @@ type DecodeEvent =
   | { type: 'done' };
 ```
 
-The client (`decodeStream.ts`) reads the response body as a stream and parses it with a small hand-rolled SSE reader rather than the browser's `EventSource` API — `EventSource` only supports `GET`, and the job posting + resume payload has to go over `POST`. Each `JobAnalysis`/`FitAnalysis` step also runs through `streamJsonStep()` in `+server.ts`, which retries the model call once if the JSON comes back malformed before surfacing an error — LLM JSON output is not 100% reliable, and a fresh generation is more likely to parse than trying to repair broken text.
+The client (`decodeStream.ts`) reads the response body as a stream and parses it with a small hand-rolled SSE reader rather than the browser's `EventSource` API — `EventSource` only supports `GET`, and the job posting + resume payload has to go over `POST`. Each JSON-producing step also runs through `streamJsonStep()` in `+server.ts`, which validates the parsed result against a zod schema (`src/lib/server/schemas.ts`) and retries the whole model call once if it's malformed *or* the wrong shape before surfacing an error — LLM output isn't 100% reliable in either dimension, and a fresh generation is more likely to be both valid and correctly shaped than trying to repair or coerce what came back.
+
+**The SSRF guard pins the connection, not just the check.** `urlFetch.ts` resolves and validates a hostname's addresses via `dns.lookup()` up front — but a guard that only does that and then calls `fetch(url, ...)` has a check-then-connect gap: `fetch`'s own DNS resolution is a second, independent query, and a malicious authoritative nameserver can answer it differently than it answered the validation query a moment earlier (classic DNS rebinding). To close that, the fetch itself goes through `undici`'s `fetch` with a custom `Agent` whose `connect.lookup` is overridden to always return the exact address that was already validated, regardless of what hostname it's asked to resolve — so the socket that opens is guaranteed to be the one that was checked.
 
 **Storage.** History lives behind a small `HistoryStorage` interface (`list`/`get`/`save`/`remove`/`clear`) with a `LocalStorageHistoryStore` implementation. Nothing above that interface knows it's `localStorage` — swapping in a real backend (Postgres/Supabase, say) later is a new class, not a rewrite.
 
@@ -104,7 +108,7 @@ Documented deliberately, not discovered by a reviewer:
 - **History is per-browser, not synced.** It's `localStorage`, so it doesn't follow you across devices or survive clearing site data. That's a real limitation for a "job search companion," and the swappable `HistoryStorage` interface exists specifically so this can change later without touching every call site.
 - **URL fetching doesn't work everywhere.** LinkedIn, Indeed, and other JS-heavy or bot-guarded sites will often return an empty shell or a block page. Pasting the text directly is always the fallback, and the UI says so.
 - **No auth, no multi-user concerns.** This is a single-user tool by design, not a corner that was cut — there's nothing here that needs a login.
-- **JSON-mode LLM output, not tool-use/structured output.** The job/fit/interview-prep steps ask the model to "return ONLY valid JSON" rather than using Anthropic's structured tool-calling output, which would guarantee schema-valid JSON. The current approach needed a one-retry safety net (see Architecture) to reach acceptable reliability; moving these three steps to tool-use is the most impactful reliability upgrade still on the table.
+- **JSON-mode LLM output, not tool-use/structured output.** The job/fit/interview-prep steps ask the model to "return ONLY valid JSON" rather than using Anthropic's structured tool-calling output, which would guarantee schema-valid JSON at the API level. The response is now validated against a zod schema before it's trusted (`src/lib/server/schemas.ts`) — a malformed *or* wrong-shaped response fails the same retry path instead of crashing a later step — but that's a safety net, not a guarantee: two bad generations in a row still surface as a user-visible error. Moving these three steps to tool-use would remove the retry-on-shape-mismatch case entirely and is still the most impactful reliability upgrade on the table.
 - **No automated UI/E2E tests.** The test suite (`npm test`) covers pure logic — JSON extraction, rate limiting, the SSRF guard, prompt builders, the history store — but every pipeline/streaming/UI behavior described in the Walkthrough has only been verified manually.
 
 ## Quick start

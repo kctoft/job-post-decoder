@@ -1,7 +1,8 @@
 import type { RequestHandler } from './$types';
 import Anthropic from '@anthropic-ai/sdk';
+import type { z } from 'zod';
 import { env } from '$env/dynamic/private';
-import type { JobAnalysis, FitAnalysis, DecodeEvent, InterviewPrepItem } from '$lib/types';
+import type { JobAnalysis, FitAnalysis, DecodeEvent } from '$lib/types';
 import { extractJson } from '$lib/parse';
 import { createRateLimiter } from '$lib/rateLimit';
 import {
@@ -11,6 +12,7 @@ import {
 	buildInterviewPrepPrompt
 } from '$lib/server/prompts';
 import { streamAgentCall } from '$lib/server/streamAgent';
+import { jobAnalysisSchema, fitAnalysisSchema, interviewPrepResultSchema } from '$lib/server/schemas';
 
 const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-5';
@@ -38,19 +40,22 @@ function sseLine(event: DecodeEvent): Uint8Array {
 	return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
 }
 
-// LLM JSON output occasionally comes back malformed (e.g. an unescaped quote inside a
-// string value). A fresh generation is more likely to be well-formed than trying to
-// repair broken JSON text, so retry the whole call once before giving up.
+// LLM output can fail in two different ways: the text isn't valid JSON at all (e.g. an
+// unescaped quote inside a string value), or it parses fine but doesn't match the shape
+// the rest of the pipeline assumes (a missing/renamed field). Both are treated the same
+// way — a fresh generation is more likely to be well-formed *and* correctly shaped than
+// trying to repair or coerce what came back, so retry the whole call once before giving up.
 async function streamJsonStep<T>(
 	prompt: string,
 	maxTokens: number,
-	onChunk: (text: string) => void
+	onChunk: (text: string) => void,
+	schema: z.ZodType<T>
 ): Promise<T> {
 	let lastErr: unknown;
 	for (let attempt = 0; attempt < 2; attempt++) {
 		const text = await streamAgentCall(client, prompt, MODEL, onChunk, maxTokens);
 		try {
-			return extractJson(text) as T;
+			return schema.parse(extractJson(text));
 		} catch (err) {
 			lastErr = err;
 		}
@@ -87,10 +92,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 
 			try {
 				send({ type: 'step-start', step: 'job' });
-				job = await streamJsonStep<JobAnalysis>(
+				job = await streamJsonStep(
 					buildJobPrompt(jobPosting),
 					MAX_TOKENS.job,
-					(chunk) => send({ type: 'delta', step: 'job', text: chunk })
+					(chunk) => send({ type: 'delta', step: 'job', text: chunk }),
+					jobAnalysisSchema
 				);
 				send({ type: 'step-complete', step: 'job', data: job });
 			} catch (err: any) {
@@ -106,10 +112,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			if (hasResume) {
 				try {
 					send({ type: 'step-start', step: 'fit' });
-					fit = await streamJsonStep<FitAnalysis>(
+					fit = await streamJsonStep(
 						buildFitPrompt(jobPosting, job, resume),
 						MAX_TOKENS.fit,
-						(chunk) => send({ type: 'delta', step: 'fit', text: chunk })
+						(chunk) => send({ type: 'delta', step: 'fit', text: chunk }),
+						fitAnalysisSchema
 					);
 					send({ type: 'step-complete', step: 'fit', data: fit });
 				} catch (err: any) {
@@ -147,10 +154,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 				if (fit) {
 					try {
 						send({ type: 'step-start', step: 'interviewPrep' });
-						const { items } = await streamJsonStep<{ items: InterviewPrepItem[] }>(
+						const { items } = await streamJsonStep(
 							buildInterviewPrepPrompt(jobPosting, job, fit, resume),
 							MAX_TOKENS.interviewPrep,
-							(chunk) => send({ type: 'delta', step: 'interviewPrep', text: chunk })
+							(chunk) => send({ type: 'delta', step: 'interviewPrep', text: chunk }),
+							interviewPrepResultSchema
 						);
 						send({ type: 'step-complete', step: 'interviewPrep', data: { items } });
 					} catch (err: any) {
