@@ -64,6 +64,10 @@
 	{#if pdfError}
 		<div class="error">{pdfError}</div>
 	{/if}
+	<div class="note">
+		Your resume and the job posting are sent to Claude's API to generate this analysis, then
+		discarded — there's no database here, and neither is logged or stored on the server.
+	</div>
 </Card>
 
 <style>
@@ -120,5 +124,10 @@
 		font-size: 12px;
 		color: #f87171;
 		margin-top: 8px;
+	}
+	.note {
+		font-size: 11px;
+		color: var(--text-dim);
+		margin-top: 10px;
 	}
 </style>

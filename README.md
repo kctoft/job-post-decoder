@@ -2,6 +2,8 @@
 
 Paste a job posting. Watch a four-step agent pipeline decode it live — the real requirements, the red flags, an honest fit score, a cover letter, and interview prep — then revisit and compare every decode later from your history.
 
+**Kitana Toft** — [kitanatoft.com](https://kitanatoft.com) · [GitHub](https://github.com/kctoft) · [source for this project](https://github.com/kctoft/job-post-decoder)
+
 ![Job Post Decoder — start screen](docs/screenshots/01-start.png)
 
 ## What it does
@@ -16,7 +18,9 @@ Every agent is instructed the same way: never invent experience, metrics, or ski
 
 ## Why a streaming pipeline, not one big call
 
-Each step is a separate model call, run in sequence, streamed to the browser over SSE as it happens — so the analysis reveals step by step instead of disappearing behind one loading spinner. Each step's prompt is also seeded with the previous steps' structured output (fit analysis gets the job analysis's extracted requirements; the cover letter and interview prep both get the fit analysis's gaps), which keeps every step focused and grounded in the same facts a human reading top-to-bottom would see. If a later step fails — say interview prep hits a malformed-JSON response — the steps that already succeeded stay on screen; only the failed step shows an error, and it retries the underlying model call once automatically before giving up.
+Each step is a separate model call, run in sequence, streamed to the browser over SSE as it happens — so the analysis reveals step by step instead of disappearing behind one loading spinner. Each step's prompt is also seeded with the previous steps' structured output (fit analysis gets the job analysis's extracted requirements; the cover letter and interview prep both get the fit analysis's gaps), which keeps every step focused and grounded in the same facts a human reading top-to-bottom would see.
+
+Failure is handled per step, not per request. If a later step fails — say interview prep hits a malformed-JSON response — the steps that already succeeded stay on screen exactly as they are; only the failed step shows an error. It first retries the underlying model call once automatically (clearing its streaming panel so the retry's output doesn't run on from the failed attempt's), and if that still fails, a "Try again" button re-runs the decode instead of leaving you at a dead end.
 
 ## Features
 
@@ -39,7 +43,7 @@ Each step is a separate model call, run in sequence, streamed to the browser ove
 - **SvelteKit** — full-stack framework, SSE streaming API routes
 - **Anthropic Claude API** — four-step streaming agent pipeline
 - **pdfjs-dist** — client-side PDF text extraction
-- **TypeScript** — end-to-end type safety
+- **TypeScript** — one shared `types.ts` drives the SSE payloads, so a server-side change to `FitAnalysis` fails the client build instead of failing silently at runtime
 - **zod** — runtime schema validation on every LLM JSON response before it's trusted
 - **Vitest** — unit tests for JSON extraction, rate limiting, the SSRF guard, HTML-to-text conversion, prompt builders, the history store, and the response schemas
 
@@ -87,7 +91,7 @@ type DecodeEvent =
   | { type: 'done' };
 ```
 
-The client (`decodeStream.ts`) reads the response body as a stream and parses it with a small hand-rolled SSE reader rather than the browser's `EventSource` API — `EventSource` only supports `GET`, and the job posting + resume payload has to go over `POST`. Each JSON-producing step also runs through `streamJsonStep()` in `+server.ts`, which validates the parsed result against a zod schema (`src/lib/server/schemas.ts`) and retries the whole model call once if it's malformed *or* the wrong shape before surfacing an error — LLM output isn't 100% reliable in either dimension, and a fresh generation is more likely to be both valid and correctly shaped than trying to repair or coerce what came back.
+The client (`decodeStream.ts`) reads the response body as a stream and parses it with a small hand-rolled SSE reader rather than the browser's `EventSource` API — `EventSource` only supports `GET`, and the job posting + resume payload has to go over `POST`. Each JSON-producing step runs through `streamJsonStep()` in `+server.ts`, which validates the parsed result against a zod schema (`src/lib/server/schemas.ts`) before returning it — see "Why a streaming pipeline" above for the retry/failure behavior this enables.
 
 **The SSRF guard pins the connection, not just the check.** `urlFetch.ts` resolves and validates a hostname's addresses via `dns.lookup()` up front — but a guard that only does that and then calls `fetch(url, ...)` has a check-then-connect gap: `fetch`'s own DNS resolution is a second, independent query, and a malicious authoritative nameserver can answer it differently than it answered the validation query a moment earlier (classic DNS rebinding). To close that, the fetch itself goes through `undici`'s `fetch` with a custom `Agent` whose `connect.lookup` is overridden to always return the exact address that was already validated, regardless of what hostname it's asked to resolve — so the socket that opens is guaranteed to be the one that was checked.
 
@@ -108,7 +112,7 @@ Documented deliberately, not discovered by a reviewer:
 - **History is per-browser, not synced.** It's `localStorage`, so it doesn't follow you across devices or survive clearing site data. That's a real limitation for a "job search companion," and the swappable `HistoryStorage` interface exists specifically so this can change later without touching every call site.
 - **URL fetching doesn't work everywhere.** LinkedIn, Indeed, and other JS-heavy or bot-guarded sites will often return an empty shell or a block page. Pasting the text directly is always the fallback, and the UI says so.
 - **No auth, no multi-user concerns.** This is a single-user tool by design, not a corner that was cut — there's nothing here that needs a login.
-- **JSON-mode LLM output, not tool-use/structured output.** The job/fit/interview-prep steps ask the model to "return ONLY valid JSON" rather than using Anthropic's structured tool-calling output, which would guarantee schema-valid JSON at the API level. The response is now validated against a zod schema before it's trusted (`src/lib/server/schemas.ts`) — a malformed *or* wrong-shaped response fails the same retry path instead of crashing a later step — but that's a safety net, not a guarantee: two bad generations in a row still surface as a user-visible error. Moving these three steps to tool-use would remove the retry-on-shape-mismatch case entirely and is still the most impactful reliability upgrade on the table.
+- **JSON-mode LLM output, not tool-use/structured output.** The job/fit/interview-prep steps ask the model to "return ONLY valid JSON" rather than using Anthropic's structured tool-calling output, which would guarantee schema-valid JSON at the API level. The response is now validated against a zod schema before it's trusted (`src/lib/server/schemas.ts`) — a malformed *or* wrong-shaped response fails the same retry path instead of crashing a later step — but that's a safety net, not a guarantee: two bad generations in a row still surface as a user-visible error (with a "Try again" button, not a dead end). Moving these three steps to tool-use would remove the retry-on-shape-mismatch case entirely and is still the most impactful reliability upgrade on the table.
 - **No automated UI/E2E tests.** The test suite (`npm test`) covers pure logic — JSON extraction, rate limiting, the SSRF guard, prompt builders, the history store — but every pipeline/streaming/UI behavior described in the Walkthrough has only been verified manually.
 
 ## Quick start
@@ -127,7 +131,7 @@ Open [http://localhost:5173](http://localhost:5173)
 
 **1. Start with a job posting.** Paste the text directly, hit "Load example" to try it on a deliberately buzzword-heavy fake posting ("rockstar, ninja-level," no salary range, three jobs bundled into one), or paste a link and hit "Fetch →" to pull the text automatically from the page.
 
-**2. Add your resume (optional).** Paste it as text or hit "Upload PDF" — parsing happens entirely in your browser via pdfjs-dist, so the file itself never touches the server. Once a resume is present, two checkboxes appear: "Also draft a cover letter" and "Also generate interview prep." Both are off by default, so a plain decode only costs 1-2 model calls.
+**2. Add your resume (optional).** Paste it as text or hit "Upload PDF" — parsing happens entirely in your browser via pdfjs-dist, so the file itself never touches the server. A line under the textarea states what does happen to the text you send: it goes to Claude's API to generate the analysis, then is discarded — there's no database and nothing is logged. Once a resume is present, two checkboxes appear: "Also draft a cover letter" and "Also generate interview prep." Both are off by default, so a plain decode only costs 1-2 model calls.
 
 ![Job posting and resume filled in, with both optional steps checked](docs/screenshots/02-filled-in.png)
 
@@ -149,22 +153,20 @@ Open [http://localhost:5173](http://localhost:5173)
   ![Suggested resume bullets and the cover letter draft](docs/screenshots/06-cover-letter.png)
   ![Cover letter closing and the interview prep question list](docs/screenshots/07-interview-prep.png)
 
-**5. Every decode auto-saves.** Click "History →" in the header to see every past decode as a card (role title, date, fit-score badge). Click into one to replay the full analysis, select 2-4 and hit "Compare selected" to see them side by side on fit score, seniority, buzzword density, salary transparency, and keyword counts — useful for deciding which of several postings is actually worth your time. Resume text itself is never stored in history, only the analysis output.
+**5. Every decode auto-saves.** Click "History →" in the header to see every past decode as a card (role title, date, fit-score badge). Click into one to replay the full analysis, select 2-4 and hit "Compare selected" to see them side by side on fit score, seniority, buzzword density, salary transparency, and keyword counts — useful for deciding which of several postings is actually worth your time.
 
-![History list with three past decodes](docs/screenshots/08-history.png)
-![Two decodes compared side by side](docs/screenshots/09-compare.png)
+![History list with two different past decodes](docs/screenshots/08-history.png)
+![Two genuinely different postings compared side by side — a clean infra role next to the buzzword-heavy example](docs/screenshots/09-compare.png)
 
-**6. If something fails partway through, you keep what already succeeded.** Each step runs and streams independently — if, say, interview prep hits a malformed response, the job analysis, fit score, and cover letter you already saw stay exactly as they are; only that one step shows an error (after retrying once automatically). The third entry in the history screenshot above is a real example of this — its fit step failed on that run, so it saved with a job analysis but no fit-score badge, instead of losing the decode entirely.
+The two entries above are real, different postings, not the same one run twice: a clean infrastructure role with a clear salary band and one red flag, next to the deliberately messy example posting with five. That's the kind of contrast "compare" is actually for.
+
+**6. If something fails partway through, you keep what already succeeded** (see "Why a streaming pipeline" above for how). Earlier test runs surfaced this for real — a fit-step failure once saved a decode with a job analysis but no fit-score badge, instead of losing it entirely.
 
 ## Tests
 
 ```bash
 npm test
 ```
-
-## Author
-
-**Kitana Toft** — [kitanatoft.com](https://kitanatoft.com) · [GitHub](https://github.com/kctoft)
 
 ## License
 

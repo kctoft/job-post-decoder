@@ -52,6 +52,7 @@ export type StepStatus = 'pending' | 'streaming' | 'complete' | 'skipped' | 'err
 
 export type DecodeEvent =
 	| { type: 'step-start'; step: PipelineStep }
+	| { type: 'step-retry'; step: PipelineStep }
 	| { type: 'delta'; step: PipelineStep; text: string }
 	| { type: 'step-complete'; step: 'job'; data: JobAnalysis }
 	| { type: 'step-complete'; step: 'fit'; data: FitAnalysis }

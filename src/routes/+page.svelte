@@ -7,6 +7,7 @@
 	import StreamingStepPanel from '$lib/components/pipeline/StreamingStepPanel.svelte';
 	import ResultsPanel from '$lib/components/results/ResultsPanel.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import { EXAMPLE_JOB, EXAMPLE_RESUME } from '$lib/types';
 	import type { JobAnalysis, FitAnalysis, InterviewPrepItem, PipelineStep, StepStatus } from '$lib/types';
 	import { streamDecode } from '$lib/client/decodeStream';
@@ -36,6 +37,8 @@
 	let streamingStep = $state<PipelineStep | null>(null);
 	let streamingText = $state<Record<string, string>>({});
 	let stepErrorMessage = $state<Record<string, string>>({});
+
+	const hasFailure = $derived(!!error || Object.values(stepStatus).includes('error'));
 
 	const STEP_LABELS: Record<PipelineStep, string> = {
 		job: 'Job analysis',
@@ -102,6 +105,12 @@
 						streamingStep = ev.step;
 						streamingText[ev.step] = '';
 						break;
+					case 'step-retry':
+						// A malformed/wrong-shaped response is being retried with a fresh
+						// generation — clear the panel so attempt 2's output doesn't run on
+						// from attempt 1's instead of replacing it.
+						streamingText[ev.step] = '';
+						break;
 					case 'delta':
 						streamingText[ev.step] = (streamingText[ev.step] ?? '') + ev.text;
 						break;
@@ -142,6 +151,14 @@
 				});
 			}
 		} catch (e: any) {
+			// The stream itself broke (dropped connection, server crash mid-decode) rather
+			// than a single step reporting its own error — whichever step was mid-flight
+			// would otherwise stay stuck showing "streaming" forever next to this message.
+			if (streamingStep) {
+				stepStatus[streamingStep] = 'error';
+				stepErrorMessage[streamingStep] = e.message || 'Connection lost';
+				streamingStep = null;
+			}
 			error = e.message || 'Something went wrong';
 		} finally {
 			loading = false;
@@ -209,6 +226,12 @@
 		</Card>
 	{/each}
 
+	{#if hasFailure && !loading}
+		<div class="retry-row">
+			<Button variant="pill" onclick={runDecode}>↻ Try again</Button>
+		</div>
+	{/if}
+
 	{#if job}
 		<ResultsPanel {job} {fit} {coverLetter} {interviewPrep} />
 	{/if}
@@ -226,6 +249,9 @@
 </div>
 
 <style>
+	.retry-row {
+		margin-bottom: 16px;
+	}
 	.page {
 		max-width: 1000px;
 		margin: 0 auto;

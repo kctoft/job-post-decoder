@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
 import { env } from '$env/dynamic/private';
-import type { JobAnalysis, FitAnalysis, DecodeEvent } from '$lib/types';
+import type { JobAnalysis, FitAnalysis, DecodeEvent, PipelineStep } from '$lib/types';
 import { extractJson } from '$lib/parse';
 import { createRateLimiter } from '$lib/rateLimit';
 import {
@@ -45,15 +45,25 @@ function sseLine(event: DecodeEvent): Uint8Array {
 // the rest of the pipeline assumes (a missing/renamed field). Both are treated the same
 // way — a fresh generation is more likely to be well-formed *and* correctly shaped than
 // trying to repair or coerce what came back, so retry the whole call once before giving up.
+// A `step-retry` event fires before the second attempt so the client can clear the
+// streaming-text panel instead of appending attempt 2's output after attempt 1's.
 async function streamJsonStep<T>(
+	step: PipelineStep,
 	prompt: string,
 	maxTokens: number,
-	onChunk: (text: string) => void,
+	send: (event: DecodeEvent) => void,
 	schema: z.ZodType<T>
 ): Promise<T> {
 	let lastErr: unknown;
 	for (let attempt = 0; attempt < 2; attempt++) {
-		const text = await streamAgentCall(client, prompt, MODEL, onChunk, maxTokens);
+		if (attempt > 0) send({ type: 'step-retry', step });
+		const text = await streamAgentCall(
+			client,
+			prompt,
+			MODEL,
+			(chunk) => send({ type: 'delta', step, text: chunk }),
+			maxTokens
+		);
 		try {
 			return schema.parse(extractJson(text));
 		} catch (err) {
@@ -92,12 +102,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 
 			try {
 				send({ type: 'step-start', step: 'job' });
-				job = await streamJsonStep(
-					buildJobPrompt(jobPosting),
-					MAX_TOKENS.job,
-					(chunk) => send({ type: 'delta', step: 'job', text: chunk }),
-					jobAnalysisSchema
-				);
+				job = await streamJsonStep('job', buildJobPrompt(jobPosting), MAX_TOKENS.job, send, jobAnalysisSchema);
 				send({ type: 'step-complete', step: 'job', data: job });
 			} catch (err: any) {
 				send({ type: 'error', step: 'job', message: err.message || 'Job analysis failed' });
@@ -113,9 +118,10 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 				try {
 					send({ type: 'step-start', step: 'fit' });
 					fit = await streamJsonStep(
+						'fit',
 						buildFitPrompt(jobPosting, job, resume),
 						MAX_TOKENS.fit,
-						(chunk) => send({ type: 'delta', step: 'fit', text: chunk }),
+						send,
 						fitAnalysisSchema
 					);
 					send({ type: 'step-complete', step: 'fit', data: fit });
@@ -155,9 +161,10 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 					try {
 						send({ type: 'step-start', step: 'interviewPrep' });
 						const { items } = await streamJsonStep(
+							'interviewPrep',
 							buildInterviewPrepPrompt(jobPosting, job, fit, resume),
 							MAX_TOKENS.interviewPrep,
-							(chunk) => send({ type: 'delta', step: 'interviewPrep', text: chunk }),
+							send,
 							interviewPrepResultSchema
 						);
 						send({ type: 'step-complete', step: 'interviewPrep', data: { items } });
