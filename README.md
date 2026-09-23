@@ -40,6 +40,71 @@ Each step is a separate model call, run in sequence, streamed to the browser ove
 - **TypeScript** — end-to-end type safety
 - **Vitest** — unit tests for JSON extraction, rate limiting, the SSRF guard, HTML-to-text conversion, prompt builders, and the history store
 
+## Architecture
+
+```
+src/
+├── routes/
+│   ├── +page.svelte              # main page: inputs + live pipeline + results
+│   ├── api/decode/+server.ts     # SSE endpoint — runs the streaming agent pipeline
+│   ├── api/fetch-url/+server.ts  # SSRF-guarded job-posting-URL-to-text fetch
+│   └── history/                  # list, detail ([id]), and compare routes (client-only)
+├── lib/
+│   ├── components/
+│   │   ├── ui/                   # Card, Badge, Button, SectionHeading — shared primitives
+│   │   ├── input/                # job posting / resume / submit-bar inputs
+│   │   ├── pipeline/              # PipelineProgress, StreamingStepPanel
+│   │   ├── results/               # one component per result section (fit score, gaps, etc.)
+│   │   └── history/               # history list/card, compare grid
+│   ├── server/
+│   │   ├── prompts.ts             # pure prompt-builder functions, one per pipeline step
+│   │   └── streamAgent.ts         # wraps the Anthropic streaming call
+│   ├── client/
+│   │   ├── decodeStream.ts        # parses the SSE response into typed events
+│   │   ├── pdf.ts                 # client-side PDF → text (pdfjs-dist)
+│   │   └── fitColor.ts
+│   ├── storage/historyStore.ts    # HistoryStorage interface + localStorage implementation
+│   ├── urlFetch.ts                # SSRF guard + HTML → text
+│   ├── rateLimit.ts, parse.ts
+│   └── types.ts                   # shared types, incl. the DecodeEvent protocol below
+```
+
+**The SSE event protocol.** `/api/decode` streams `data: {...}\n\n` lines, each one a `DecodeEvent` (defined in `src/lib/types.ts`):
+
+```ts
+type PipelineStep = 'job' | 'fit' | 'coverLetter' | 'interviewPrep';
+
+type DecodeEvent =
+  | { type: 'step-start'; step: PipelineStep }
+  | { type: 'delta'; step: PipelineStep; text: string }          // raw streamed text
+  | { type: 'step-complete'; step: PipelineStep; data: ... }     // parsed result for that step
+  | { type: 'step-skipped'; step: PipelineStep; reason: string } // e.g. no resume given
+  | { type: 'error'; step?: PipelineStep; message: string }
+  | { type: 'done' };
+```
+
+The client (`decodeStream.ts`) reads the response body as a stream and parses it with a small hand-rolled SSE reader rather than the browser's `EventSource` API — `EventSource` only supports `GET`, and the job posting + resume payload has to go over `POST`. Each `JobAnalysis`/`FitAnalysis` step also runs through `streamJsonStep()` in `+server.ts`, which retries the model call once if the JSON comes back malformed before surfacing an error — LLM JSON output is not 100% reliable, and a fresh generation is more likely to parse than trying to repair broken text.
+
+**Storage.** History lives behind a small `HistoryStorage` interface (`list`/`get`/`save`/`remove`/`clear`) with a `LocalStorageHistoryStore` implementation. Nothing above that interface knows it's `localStorage` — swapping in a real backend (Postgres/Supabase, say) later is a new class, not a rewrite.
+
+## Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes | Powers every pipeline step. Without it, `/api/decode` returns a 500 with a clear "Server is not configured" message instead of failing opaquely. |
+
+Copy `.env.example` to `.env` and fill it in — see Quick start below.
+
+## Limitations & known tradeoffs
+
+Documented deliberately, not discovered by a reviewer:
+
+- **History is per-browser, not synced.** It's `localStorage`, so it doesn't follow you across devices or survive clearing site data. That's a real limitation for a "job search companion," and the swappable `HistoryStorage` interface exists specifically so this can change later without touching every call site.
+- **URL fetching doesn't work everywhere.** LinkedIn, Indeed, and other JS-heavy or bot-guarded sites will often return an empty shell or a block page. Pasting the text directly is always the fallback, and the UI says so.
+- **No auth, no multi-user concerns.** This is a single-user tool by design, not a corner that was cut — there's nothing here that needs a login.
+- **JSON-mode LLM output, not tool-use/structured output.** The job/fit/interview-prep steps ask the model to "return ONLY valid JSON" rather than using Anthropic's structured tool-calling output, which would guarantee schema-valid JSON. The current approach needed a one-retry safety net (see Architecture) to reach acceptable reliability; moving these three steps to tool-use is the most impactful reliability upgrade still on the table.
+- **No automated UI/E2E tests.** The test suite (`npm test`) covers pure logic — JSON extraction, rate limiting, the SSRF guard, prompt builders, the history store — but every pipeline/streaming/UI behavior described in the Walkthrough has only been verified manually.
+
 ## Quick start
 
 ```bash
