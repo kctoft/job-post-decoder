@@ -2,6 +2,8 @@
 
 Paste a job posting. Watch a four-step agent pipeline decode it live — the real requirements, the red flags, an honest fit score, a cover letter, and interview prep — then revisit and compare every decode later from your history.
 
+![Job Post Decoder — start screen](docs/screenshots/01-start.png)
+
 ## What it does
 
 1. Paste a job posting, or a link to one
@@ -123,18 +125,32 @@ Open [http://localhost:5173](http://localhost:5173)
 
 **2. Add your resume (optional).** Paste it as text or hit "Upload PDF" — parsing happens entirely in your browser via pdfjs-dist, so the file itself never touches the server. Once a resume is present, two checkboxes appear: "Also draft a cover letter" and "Also generate interview prep." Both are off by default, so a plain decode only costs 1-2 model calls.
 
+![Job posting and resume filled in, with both optional steps checked](docs/screenshots/02-filled-in.png)
+
 **3. Hit "Decode Job Posting →" and watch the pipeline run live.** A step indicator appears — Job analysis → Fit score → Cover letter → Interview prep — each bubble moving from a hollow pending circle, to a pulsing "streaming" state, to a green checkmark. While a step is generating, a live panel underneath shows its raw output arriving token by token: JSON for job/fit/interview-prep, plain prose for the cover letter (the most satisfying one to watch — an actual letter typing itself out in real time).
+
+![Job analysis complete, fit score streaming live in the panel below](docs/screenshots/03-pipeline-live.png)
 
 **4. Results appear as each step finishes** — you don't wait for the whole pipeline:
 - **Job analysis** lands first: a plain-English role summary, badges for seniority/buzzword density/salary transparency, must-haves vs. nice-to-haves side by side, and a red-flags list (or a "reads clean" note if there genuinely aren't any).
 - **Fit score** appears next as a color-coded 0-100 gauge (green/amber/red) with an honest summary — it won't inflate your odds. Below it: what you've already got covered, what's missing, and a **top-5 priority gaps** list, each one backed by a real quoted snippet from the posting so you can see exactly why it flagged that gap.
+
+  ![Fit score gauge, red flags, and matched/missing keyword chips](docs/screenshots/04-fit-score.png)
+  ![Top priority gaps, each with a quoted snippet from the posting](docs/screenshots/05-priority-gaps.png)
+
 - **Suggested resume bullets** follow, in XYZ format, each one built only from facts already on your resume and mapped to the specific gap it addresses.
 - **Cover letter** (if requested) renders in its own card with a one-click copy button.
 - **Interview prep** (if requested) renders as a list of likely questions paired with honest talking points — grounded in the same gaps and red flags already surfaced, not invented on the spot.
 
+  ![Suggested resume bullets and the cover letter draft](docs/screenshots/06-cover-letter.png)
+  ![Cover letter closing and the interview prep question list](docs/screenshots/07-interview-prep.png)
+
 **5. Every decode auto-saves.** Click "History →" in the header to see every past decode as a card (role title, date, fit-score badge). Click into one to replay the full analysis, select 2-4 and hit "Compare selected" to see them side by side on fit score, seniority, buzzword density, salary transparency, and keyword counts — useful for deciding which of several postings is actually worth your time. Resume text itself is never stored in history, only the analysis output.
 
-**6. If something fails partway through, you keep what already succeeded.** Each step runs and streams independently — if, say, interview prep hits a malformed response, the job analysis, fit score, and cover letter you already saw stay exactly as they are; only that one step shows an error (after retrying once automatically).
+![History list with three past decodes](docs/screenshots/08-history.png)
+![Two decodes compared side by side](docs/screenshots/09-compare.png)
+
+**6. If something fails partway through, you keep what already succeeded.** Each step runs and streams independently — if, say, interview prep hits a malformed response, the job analysis, fit score, and cover letter you already saw stay exactly as they are; only that one step shows an error (after retrying once automatically). The third entry in the history screenshot above is a real example of this — its fit step failed on that run, so it saved with a job analysis but no fit-score badge, instead of losing the decode entirely.
 
 ## Tests
 
